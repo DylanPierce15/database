@@ -1,0 +1,29 @@
+<!-- library_view.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Library Database View</title>
+</head>
+<body>
+    <h1>Library Database View</h1>
+
+    <table border="1">
+        <tr>
+            <th>User ID</th>
+            <th>User Name</th>
+            <th>Time In</th>
+            <th>Time Out</th>
+        </tr>
+        {% for log_entry in library_logs %}
+            <tr>
+                <td>{{ log_entry.user_id }}</td>
+                <td>{{ log_entry.user.name }}</td>
+                <td>{{ log_entry.time_in }}</td>
+                <td>{{ log_entry.time_out if log_entry.time_out else "Not signed out" }}</td>
+            </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>
