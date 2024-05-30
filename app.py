@@ -1,8 +1,5 @@
-# Import necessary modules
-
-# Add time and sign everyone out after lunch
-# In report write who was signed in
-# try to get data to automatically update without manually refreshing it
+# Sign everyone out after lunch
+#add a token so only librarian can access the web
 
 from flask import Flask, request, jsonify, render_template
 from flask_sqlalchemy import SQLAlchemy
@@ -12,19 +9,17 @@ import time
 from datetime import datetime, timezone, timedelta
 import pytz
 from pytz import timezone
-
+from functools import wraps
 
 data_hashmap = {}
 
 
-# Initialize Flask application
 app = Flask(__name__)
-# Configure SQLite database URI
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///students_library.db'
-# Initialize SQLAlchemy object
-
+LIBRARIAN_TOKEN = 'a'
 db = SQLAlchemy(app)
 socketio = SocketIO(app)
+
 
 
 def datetimeformat(value, format='%Y-%m-%d %H:%M:%S'):
@@ -33,18 +28,14 @@ def datetimeformat(value, format='%Y-%m-%d %H:%M:%S'):
     
     if isinstance(value, str):
         try:
-            # Convert the string to a datetime object
             value = datetime.fromisoformat(value)
         except ValueError:
-            # If conversion fails, return the original value
             return value
     
     print("Value after conversion (if applicable):", value)
     
     if isinstance(value, datetime):
-        # Convert the datetime object to UTC time zone
         value_utc = value.replace(tzinfo=pytz.utc)
-        # Convert to the desired time zone (EST)
         est = pytz.timezone('America/New_York')
         value_est = value_utc.astimezone(est)
         return value_est.strftime(format)
@@ -66,7 +57,6 @@ class LibraryLog(db.Model):
     time_in = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     time_out = db.Column(db.DateTime)
 
-    # Define the relationship with the User model
     user = db.relationship('User', backref=db.backref('library_logs', lazy=True))
 
 # Create tables in the database
@@ -80,29 +70,23 @@ def load_student_data():
         # Read data from CSV file into a pandas DataFrame
         data = pd.read_csv('C:\\Users\\24pierced\\Desktop\\BackendDataBase\\students_data.csv', delimiter=',')
 
-        # Check if the DataFrame is empty
         if data.empty:
             print("Error: CSV file is empty.")
             return
-        # Check if the DataFrame has columns
         if not data.columns.any():
             print("Error: CSV file does not have columns.")
             return
 
         print("Loaded Data:")
 
-        # Iterate over each row in the DataFrame
         for _, row in data.iterrows():
-            # Check if 'id_code' column exists in the row
             if 'id_code' in row:
                 name = row['name']
                 id_code = str(row['id_code'])
                 data_hashmap[name] = id_code
 
-                # Check if the user already exists in the User table
                 user_exists = User.query.filter_by(id=id_code).first()
                 if not user_exists:
-                    # If not, add the user to the User table
                     new_user = User(id=id_code, name=name)
                     db.session.add(new_user)
                     db.session.commit()
@@ -115,6 +99,17 @@ def load_student_data():
         print("Data loaded successfully.")
     except Exception as e:
         print(f"Error during data loading. Exception Type: {type(e).__name__}, Message: {e}")
+
+def token_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        token = 'a'
+        print(f"Received Token: {token}")  # Debug statement
+        if not token or token != LIBRARIAN_TOKEN:
+            print("Token is missing or invalid!")  # Debug statement
+            return jsonify({'message': 'Token is missing or invalid!'}), 403
+        return f(*args, **kwargs)
+    return decorated_function
 
 # Endpoint for user sign-in
 @app.route('/signin', methods=['POST'])
@@ -141,11 +136,11 @@ def signout():
     user_id = data.get('user_id')
     user = User.query.get(user_id)
     if user:
-        est_timezone = pytz.timezone('America/New_York')
-        current_time_est = datetime.now(tz=est_timezone)
+        current_time_utc = datetime.now(timezone.utc)
+        current_time_adjusted = current_time_utc - timedelta(hours = 4)
         log_entry = LibraryLog.query.filter_by(user_id=user_id, time_out=None).first()
         if log_entry:
-            log_entry.time_out = current_time_est
+            log_entry.time_out = current_time_adjusted
             db.session.commit()
             socketio.emit('refresh', namespace='/library')
             return jsonify(message=f"{user.name} signed out successfully."), 200
@@ -174,10 +169,11 @@ def library_action():
     if user:
         # Check if the user is currently signed in
         log_entry = LibraryLog.query.filter_by(user_id=user_id, time_out=None).first()
-
+        current_time_utc = datetime.now(pytz.utc)
+        current_time_adjusted = current_time_utc - timedelta(hours = 4)
         if log_entry:
             # If signed in, sign them out
-            log_entry.time_out = datetime.utcnow()
+            log_entry.time_out = current_time_adjusted
             db.session.commit()
             message = f"{user.name} signed out successfully."
         else:
@@ -199,14 +195,42 @@ def library_action():
 
 # Endpoint for viewing library database
 @app.route('/library_view')
+@token_required
 def library_view():
-    library_logs = LibraryLog.query.all()
+    # Get query parameters for date and name filtering
+    date_filter = request.args.get('date')
+    name_filter = request.args.get('name')
+    show_all = request.args.get('show_all')
+
+    # Get library logs based on date and name filters
+    if show_all:
+        library_logs = LibraryLog.query
+    else:
+        if date_filter:
+            try:
+                date_filter_dt = datetime.strptime(date_filter, '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify(error="Invalid date format. Please use YYYY-MM-DD."), 400
+        else:
+            # Default to today's date if no date is provided
+            date_filter_dt = datetime.now().date()
+        
+        # Filter logs for the specific date
+        library_logs = LibraryLog.query.filter(
+            LibraryLog.time_in >= date_filter_dt,
+            LibraryLog.time_in < date_filter_dt + timedelta(days=1)
+        )
+
+    if name_filter:
+        library_logs = library_logs.join(User).filter(User.name == name_filter)
+
+    library_logs = library_logs.all()
+
+    # Count the number of students currently signed in
     signed_in_count = LibraryLog.query.filter(LibraryLog.time_out.is_(None)).count()
+
     return render_template('library_view.html', library_logs=library_logs, signed_in_count=signed_in_count)
 
-@socketio.on('connect', namespace='/library')
-def test_connect():
-    print('Client connected')
 
 
 if __name__ == '__main__':
