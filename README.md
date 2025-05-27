@@ -25,14 +25,11 @@ library-database/
 ├── LICENSE 
 ├── gitignore 
 ├── requirements.txt 
-├── config.py
-├── run.py 
 ├── app/ 
 │ └── app.py
 ├── templates/ 
 │ ├── library_view.html 
-│ ├── students.html
-│ └── product_manual.jpg
+│ └── students.html
 
 ## 📦 Installation
 
