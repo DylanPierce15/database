@@ -19,6 +19,21 @@ A web-based system for logging and monitoring student check-ins and check-outs a
 - SQLite (or PostgreSQL/MySQL)
 - Optional: Flask-Migrate for DB migrations
 
+📁 Folder Structure
+library-database/ 
+├── README.md 
+├── LICENSE 
+├── gitignore 
+├── requirements.txt 
+├── config.py
+├── run.py 
+├── app/ 
+│ └── app.py
+├── templates/ 
+│ ├── library_view.html 
+│ ├── students.html
+│ └── product_manual.jpg
+
 ## 📦 Installation
 
 ```bash
